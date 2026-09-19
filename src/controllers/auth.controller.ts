@@ -6,5 +6,6 @@ export const authController = {
     ok(s, await authService.register((r as any).validated.body), 201),
   login: async (r: Request, s: Response) =>
     ok(s, await authService.login((r as any).validated.body)),
-  logout: async (r: Request, s: Response) => ok(s, {}),
+  logout: async (r: Request, s: Response) =>
+    ok(s, await authService.logout(r.auth?.userId)),
 };

@@ -2,6 +2,8 @@ import { users } from "../repositories/user.repository";
 import { friends } from "../repositories/friend.repository";
 import { permissions } from "../repositories/permission.repository";
 import { sessions } from "../repositories/session.repository";
+import { connections } from "../websocket/connection.manager";
+
 export async function canListen(listenerUserId: string, ownerUserId: string) {
   if (listenerUserId === ownerUserId)
     return { ok: false, code: "AUDIO_PERMISSION_DENIED" };
@@ -14,7 +16,8 @@ export async function canListen(listenerUserId: string, ownerUserId: string) {
     return { ok: false, code: "NOT_FRIENDS" };
   const p = await permissions.get(ownerUserId, listenerUserId);
   if (!p?.isAllowed) return { ok: false, code: "AUDIO_PERMISSION_DENIED" };
-  if (!o.isOnline) return { ok: false, code: "AUDIO_OWNER_OFFLINE" };
+  if (!o.isOnline && !connections.has(ownerUserId))
+    return { ok: false, code: "AUDIO_OWNER_OFFLINE" };
   if (await sessions.activeFor(ownerUserId))
     return { ok: false, code: "AUDIO_OWNER_BUSY" };
   if (await sessions.activeFor(listenerUserId))

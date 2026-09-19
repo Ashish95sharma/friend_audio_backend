@@ -1,17 +1,20 @@
 import { users } from "../repositories/user.repository";
 import { hashPassword, verifyPassword } from "../utils/password";
 import { ConflictError, AuthenticationError } from "../utils/errors";
-import { signAccessToken, randomToken, hashToken } from "../utils/jwt";
-import { RefreshToken } from "../models/RefreshToken";
+import { signAccessToken } from "../utils/jwt";
 import crypto from "crypto";
+import { presenceService } from "./presence.service";
+
 const dto = (u: any) => ({
   id: String(u._id),
   username: u.username,
   displayName: u.displayName,
   email: u.email,
   avatarUrl: u.avatarUrl ?? null,
-  isOnline: u.isOnline,
+  isOnline: !!u.isOnline,
+  lastSeenAt: u.lastSeenAt ?? null,
 });
+
 export const authService = {
   dto,
   register: async (x: any) => {
@@ -28,19 +31,28 @@ export const authService = {
       passwordHash: await hashPassword(x.password),
       displayName: x.displayName || x.username,
     });
+    const id = String(u._id);
+    await presenceService.online(id);
+    const fresh: any = await users.findById(id);
     const sid = crypto.randomUUID();
-    const token = signAccessToken({ userId: String(u._id), sid });
-    return { token, user: dto(u) };
+    const token = signAccessToken({ userId: id, sid });
+    return { token, user: dto(fresh ?? u) };
   },
   login: async (x: any) => {
     const u = await users.findByLogin(x.emailOrUsername);
     if (!u || !(await verifyPassword(x.password, u.passwordHash)))
       throw new AuthenticationError("Invalid credentials");
+    const id = String(u._id);
+    await presenceService.online(id);
+    const fresh: any = await users.findById(id);
     const sid = crypto.randomUUID();
     return {
-      token: signAccessToken({ userId: String(u._id), sid }),
-      user: dto(u),
+      token: signAccessToken({ userId: id, sid }),
+      user: dto(fresh ?? { ...u.toObject?.() ?? u, isOnline: true }),
     };
   },
-  logout: async () => ({}),
+  logout: async (userId?: string) => {
+    if (userId) await presenceService.offline(userId);
+    return {};
+  },
 };

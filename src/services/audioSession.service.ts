@@ -1,6 +1,7 @@
 import { canListen } from "./audioAuthorization.service";
 import { sessions } from "../repositories/session.repository";
 import { AuthorizationError, AppError, NotFoundError } from "../utils/errors";
+import { emit } from "../websocket/connection.manager";
 const fail = (x: any) => {
   throw new AppError(403, x.code, "Audio session authorization failed");
 };
@@ -9,11 +10,17 @@ export const audioSessionService = {
     if (me !== x.listenerUserId) throw new AuthorizationError();
     const a = await canListen(me, x.ownerUserId);
     if (!a.ok) fail(a);
-    return sessions.create({
+    const session: any = await sessions.create({
       ownerUserId: x.ownerUserId,
       listenerUserId: me,
       status: "requesting",
     });
+    emit(String(x.ownerUserId), "audio.session.requested", {
+      sessionId: String(session._id),
+      ownerUserId: String(x.ownerUserId),
+      listenerUserId: me,
+    });
+    return session;
   },
   active: (id: string) => sessions.activeFor(id),
   transition: async (me: string, id: string, status: string) => {

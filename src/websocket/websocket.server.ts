@@ -2,10 +2,18 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Server } from "http";
 import { env } from "../config/env";
 import { verifyAccessToken } from "../utils/jwt";
-import { connections } from "./connection.manager";
+import { connections, emit, emitToFriends } from "./connection.manager";
 import { presenceService } from "../services/presence.service";
 import { signalingService } from "../services/signaling.service";
 import { audioSessionService } from "../services/audioSession.service";
+
+const SIGNALING = new Set([
+  "audio.offer",
+  "audio.answer",
+  "audio.ice_candidate",
+  "audio.session.started",
+]);
+
 export function attachWebSocket(server: Server) {
   const wss = new WebSocketServer({
     server,
@@ -22,10 +30,27 @@ export function attachWebSocket(server: Server) {
       const id = a.userId;
       connections.add(id, ws);
       await presenceService.online(id);
+      setImmediate(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "ws.connected",
+              payload: { userId: id },
+              at: new Date().toISOString(),
+            }),
+          );
+        }
+      });
+      await emitToFriends(id, "presence.updated", {
+        userId: id,
+        isOnline: true,
+      });
       ws.on("message", async (raw) => {
         try {
           const m = JSON.parse(String(raw));
-          if (!m.type || !m.sessionId) throw new Error();
+          if (!m?.type) throw new Error();
+          if (!SIGNALING.has(m.type)) return;
+          if (!m.sessionId) throw new Error();
           const s: any = await signalingService.verify(id, m.sessionId, m.type);
           if (m.type === "audio.session.started")
             await audioSessionService.transition(id, m.sessionId, "active");
@@ -41,16 +66,18 @@ export function attachWebSocket(server: Server) {
               m,
             );
         } catch {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              payload: { code: "WS_INVALID_EVENT" },
-            }),
-          );
+          emit(id, "error", { code: "WS_INVALID_EVENT" });
         }
       });
       ws.on("close", async () => {
-        if (!connections.remove(id, ws)) await presenceService.offline(id);
+        if (!connections.remove(id, ws)) {
+          const lastSeenAt = await presenceService.offline(id);
+          await emitToFriends(id, "presence.updated", {
+            userId: id,
+            isOnline: false,
+            lastSeenAt: lastSeenAt ?? new Date(),
+          });
+        }
       });
       ws.on("error", () => {});
     } catch {

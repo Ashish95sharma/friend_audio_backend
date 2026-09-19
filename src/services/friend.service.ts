@@ -7,6 +7,25 @@ import {
 } from "../utils/errors";
 import { permissions } from "../repositories/permission.repository";
 import { sessions } from "../repositories/session.repository";
+import { connections, emit } from "../websocket/connection.manager";
+
+const requestDto = async (request: any, fallbackFromId?: string) => {
+  const sender: any = request.fromUserId;
+  const senderId = String(sender?._id ?? sender ?? fallbackFromId ?? "");
+  const user: any = sender?.username
+    ? sender
+    : await users.findById(senderId);
+  return {
+    id: String(request._id),
+    fromUserId: senderId,
+    fromUsername: user?.username ?? "Unknown",
+    fromDisplayName: user?.displayName ?? user?.username ?? "Unknown",
+    avatarUrl: user?.avatarUrl ?? null,
+    status: request.status,
+    createdAt: request.createdAt,
+  };
+};
+
 export const friendService = {
   send: async (me: string, to: string) => {
     if (me === to)
@@ -21,7 +40,10 @@ export const friendService = {
         "FRIEND_REQUEST_EXISTS",
         "Pending request exists",
       );
-    return friends.request(me, to);
+    const request = await friends.request(me, to);
+    const dto = await requestDto(request, me);
+    emit(to, "friend.request.received", dto);
+    return dto;
   },
   requests: async (id: string, direction = "incoming") => {
     if (direction === "outgoing") {
@@ -35,45 +57,32 @@ export const friendService = {
       }));
     }
     const requests: any[] = await friends.requestsFor(id);
-    return Promise.all(
-      requests.map(async (request) => {
-        // requestsFor populates fromUserId. Use that populated document when
-        // available; converting the entire document to a string causes an
-        // invalid Mongo ObjectId lookup and a 500 response.
-        const sender: any = request.fromUserId;
-        const senderId = String(sender?._id ?? sender);
-        const user: any = sender?.username
-          ? sender
-          : await users.findById(senderId);
-        return {
-          id: String(request._id),
-          fromUserId: senderId,
-          fromUsername: user?.username ?? "Unknown",
-          fromDisplayName: user?.displayName ?? user?.username ?? "Unknown",
-          avatarUrl: user?.avatarUrl ?? null,
-          status: request.status,
-          createdAt: request.createdAt,
-        };
-      }),
-    );
+    return Promise.all(requests.map((request) => requestDto(request)));
   },
   accept: async (me: string, id: string) => {
     const r: any = await friends.findRequest(id);
     if (!r || r.status !== "pending")
       throw new NotFoundError("FRIEND_REQUEST_NOT_FOUND", "Request not found");
     if (String(r.toUserId) !== me) throw new AuthorizationError();
-    await friends.create(String(r.fromUserId), me);
+    const senderId = String(r.fromUserId);
+    await friends.create(senderId, me);
     r.status = "accepted";
     await r.save();
-    return r;
+    const dto = await requestDto(r, senderId);
+    emit(senderId, "friend.request.accepted", { ...dto, userId: me });
+    return dto;
   },
   reject: async (me: string, id: string) => {
     const r: any = await friends.findRequest(id);
     if (!r || r.status !== "pending")
       throw new NotFoundError("FRIEND_REQUEST_NOT_FOUND", "Request not found");
     if (String(r.toUserId) !== me) throw new AuthorizationError();
+    const senderId = String(r.fromUserId);
     r.status = "rejected";
-    return r.save();
+    await r.save();
+    const dto = await requestDto(r, senderId);
+    emit(senderId, "friend.request.rejected", dto);
+    return dto;
   },
   list: async (me: string) => {
     const fs: any[] = await friends.list(me);
@@ -82,12 +91,14 @@ export const friendService = {
         const uid = String(f.userA) === me ? String(f.userB) : String(f.userA);
         const u: any = await users.findById(uid);
         const p = await permissions.get(uid, me);
+        const live = connections.has(uid);
         return {
           id: uid,
           userId: uid,
           username: u.username,
           displayName: u.displayName,
-          isOnline: u.isOnline,
+          isOnline: live || !!u?.isOnline,
+          lastSeenAt: u?.lastSeenAt ?? null,
           canHearAudio: !!p?.isAllowed,
           friendsSince: f.createdAt,
         };

@@ -2,8 +2,21 @@ import { permissions } from "../repositories/permission.repository";
 import { friends } from "../repositories/friend.repository";
 import { AuthorizationError, ConflictError } from "../utils/errors";
 import { sessions } from "../repositories/session.repository";
+import { emit } from "../websocket/connection.manager";
+
+const permissionDto = (p: any) => ({
+  id: String(p._id),
+  ownerUserId: String(p.ownerUserId?._id ?? p.ownerUserId),
+  listenerUserId: String(p.listenerUserId?._id ?? p.listenerUserId),
+  isAllowed: !!p.isAllowed,
+  updatedAt: p.updatedAt,
+});
+
 export const audioPermissionService = {
-  list: (id: string) => permissions.forOwner(id),
+  list: async (id: string) => {
+    const docs: any[] = await permissions.forOwner(id);
+    return docs.map(permissionDto);
+  },
   set: async (me: string, x: any) => {
     if (x.ownerUserId !== me)
       throw new AuthorizationError("Only owner can change permission");
@@ -19,6 +32,8 @@ export const audioPermissionService = {
         await s.save();
       }
     }
-    return p;
+    const dto = permissionDto(p);
+    emit(x.listenerUserId, "audio.permission.changed", dto);
+    return dto;
   },
 };

@@ -4,7 +4,11 @@ import { permissions } from "../repositories/permission.repository";
 import { sessions } from "../repositories/session.repository";
 import { connections } from "../websocket/connection.manager";
 
-export async function canListen(listenerUserId: string, ownerUserId: string) {
+export async function canListen(
+  listenerUserId: string,
+  ownerUserId: string,
+  opts: { excludeSessionId?: string } = {},
+) {
   if (listenerUserId === ownerUserId)
     return { ok: false, code: "AUDIO_PERMISSION_DENIED" };
   const [l, o] = await Promise.all([
@@ -17,13 +21,13 @@ export async function canListen(listenerUserId: string, ownerUserId: string) {
   const p = await permissions.get(ownerUserId, listenerUserId);
   if (!p?.isAllowed) return { ok: false, code: "AUDIO_PERMISSION_DENIED" };
 
-  // Live socket wins; DB flag is the fallback after Render restarts.
   const online = connections.has(ownerUserId) || !!o.isOnline;
   if (!online) return { ok: false, code: "AUDIO_OWNER_OFFLINE" };
 
-  if (await sessions.activeFor(ownerUserId))
+  // Pending "requesting" is not busy — only live connecting/active blocks.
+  if (await sessions.busyFor(ownerUserId, opts.excludeSessionId))
     return { ok: false, code: "AUDIO_OWNER_BUSY" };
-  if (await sessions.activeFor(listenerUserId))
+  if (await sessions.busyFor(listenerUserId, opts.excludeSessionId))
     return { ok: false, code: "AUDIO_LISTENER_BUSY" };
   return { ok: true, owner: o, listener: l };
 }

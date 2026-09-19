@@ -7,8 +7,9 @@ const REASON: Record<string, string> = {
   AUDIO_PERMISSION_DENIED:
     "This friend has not allowed you to hear their audio.",
   AUDIO_OWNER_OFFLINE: "This friend is offline. Ask them to open Orbit.",
-  AUDIO_OWNER_BUSY: "This friend is already in an audio session.",
-  AUDIO_LISTENER_BUSY: "You already have an active audio session. Stop it first.",
+  AUDIO_OWNER_BUSY: "This friend is already in a live audio session.",
+  AUDIO_LISTENER_BUSY:
+    "You are already in a live audio session. Stop it first, then try again.",
   NOT_FRIENDS: "You can only hear audio from friends.",
   USER_NOT_FOUND: "User not found.",
 };
@@ -24,7 +25,8 @@ const fail = (x: any) => {
 export const audioSessionService = {
   create: async (me: string, x: any) => {
     if (me !== x.listenerUserId) throw new AuthorizationError();
-    // Clear stuck requesting/connecting sessions so retries are not blocked.
+    // Clear any open session between this pair, plus other stuck pending ones.
+    await sessions.clearBetween(me, x.ownerUserId);
     await sessions.clearPendingFor(me);
     await sessions.clearPendingFor(x.ownerUserId);
     const a = await canListen(me, x.ownerUserId);
@@ -51,7 +53,10 @@ export const audioSessionService = {
     if (!owner && !listener) throw new AuthorizationError();
     if (status === "connecting") {
       if (!owner) throw new AuthorizationError();
-      const a = await canListen(String(s.listenerUserId), me);
+      // Exclude this session — otherwise accept always looks "already paired".
+      const a = await canListen(String(s.listenerUserId), me, {
+        excludeSessionId: id,
+      });
       if (!a.ok) fail(a);
       if (s.status !== "requesting")
         throw new AppError(409, "AUDIO_SESSION_INVALID_STATE", "Invalid state");

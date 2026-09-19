@@ -12,6 +12,7 @@ const SIGNALING = new Set([
   "audio.answer",
   "audio.ice_candidate",
   "audio.session.started",
+  "audio.listener.ready",
 ]);
 
 export function attachWebSocket(server: Server) {
@@ -54,10 +55,13 @@ export function attachWebSocket(server: Server) {
           const s: any = await signalingService.verify(id, m.sessionId, m.type);
           if (m.type === "audio.session.started")
             await audioSessionService.transition(id, m.sessionId, "active");
+          // Owner offers → listener; listener answers → owner.
           if (m.type === "audio.offer")
-            connections.send(String(s.ownerUserId), m);
-          else if (m.type === "audio.answer")
             connections.send(String(s.listenerUserId), m);
+          else if (m.type === "audio.answer")
+            connections.send(String(s.ownerUserId), m);
+          else if (m.type === "audio.listener.ready")
+            connections.send(String(s.ownerUserId), m);
           else if (m.type === "audio.ice_candidate")
             connections.send(
               String(s.ownerUserId) === id

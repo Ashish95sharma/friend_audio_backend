@@ -63,7 +63,7 @@ Events use:
 { "type": "audio.offer", "sessionId": "...", "payload": {} }
 ```
 
-Supported signaling: `audio.offer`, `audio.answer`, `audio.ice_candidate`, and `audio.session.started`. The server authenticates sockets, validates session membership/state, and relays SDP/ICE without storing media.
+Supported signaling: `audio.listener.ready`, `audio.offer` (owner), `audio.answer` (listener), `audio.ice_candidate`, and `audio.session.started`. The server authenticates sockets, validates session membership/state, and relays SDP/ICE without storing media.
 
 ## Seed data
 

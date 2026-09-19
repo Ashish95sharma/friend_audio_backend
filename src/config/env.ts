@@ -17,6 +17,10 @@ const s = z.object({
   TURN_URL: z.string().optional(),
   TURN_USERNAME: z.string().optional(),
   TURN_PASSWORD: z.string().optional(),
+  /** e.g. myapp.metered.live (no https://) */
+  METERED_DOMAIN: z.string().optional(),
+  /** API key from Metered TURN credential */
+  METERED_TURN_API_KEY: z.string().optional(),
   REQUESTING_TIMEOUT_MS: z.coerce.number().default(60000),
   CONNECTING_TIMEOUT_MS: z.coerce.number().default(120000),
   HEARTBEAT_INTERVAL_MS: z.coerce.number().default(30000),

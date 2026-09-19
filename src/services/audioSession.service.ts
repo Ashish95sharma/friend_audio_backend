@@ -2,12 +2,31 @@ import { canListen } from "./audioAuthorization.service";
 import { sessions } from "../repositories/session.repository";
 import { AuthorizationError, AppError, NotFoundError } from "../utils/errors";
 import { emit } from "../websocket/connection.manager";
-const fail = (x: any) => {
-  throw new AppError(403, x.code, "Audio session authorization failed");
+
+const REASON: Record<string, string> = {
+  AUDIO_PERMISSION_DENIED:
+    "This friend has not allowed you to hear their audio.",
+  AUDIO_OWNER_OFFLINE: "This friend is offline. Ask them to open Orbit.",
+  AUDIO_OWNER_BUSY: "This friend is already in an audio session.",
+  AUDIO_LISTENER_BUSY: "You already have an active audio session. Stop it first.",
+  NOT_FRIENDS: "You can only hear audio from friends.",
+  USER_NOT_FOUND: "User not found.",
 };
+
+const fail = (x: any) => {
+  throw new AppError(
+    403,
+    x.code || "AUDIO_SESSION_UNAUTHORIZED",
+    REASON[x.code] || x.message || "Audio session authorization failed",
+  );
+};
+
 export const audioSessionService = {
   create: async (me: string, x: any) => {
     if (me !== x.listenerUserId) throw new AuthorizationError();
+    // Clear stuck requesting/connecting sessions so retries are not blocked.
+    await sessions.clearPendingFor(me);
+    await sessions.clearPendingFor(x.ownerUserId);
     const a = await canListen(me, x.ownerUserId);
     if (!a.ok) fail(a);
     const session: any = await sessions.create({
@@ -41,14 +60,26 @@ export const audioSessionService = {
       if (!owner || s.status !== "requesting")
         throw new AppError(409, "AUDIO_SESSION_INVALID_STATE", "Invalid state");
       s.status = "rejected";
+      s.endedAt = new Date();
+      s.endedBy = me;
     } else if (status === "active") {
       if (!owner && !listener) throw new AuthorizationError();
-      if (s.status !== "connecting")
+      if (s.status !== "connecting" && s.status !== "requesting")
         throw new AppError(409, "AUDIO_SESSION_INVALID_STATE", "Invalid state");
       s.status = "active";
       s.startedAt = new Date();
     } else throw new AppError(422, "VALIDATION_ERROR", "Unsupported status");
     await s.save();
+    const peer =
+      String(s.ownerUserId) === me
+        ? String(s.listenerUserId)
+        : String(s.ownerUserId);
+    emit(peer, "audio.session.updated", {
+      sessionId: String(s._id),
+      status: s.status,
+      ownerUserId: String(s.ownerUserId),
+      listenerUserId: String(s.listenerUserId),
+    });
     return s;
   },
   stop: async (me: string, id: string) => {
@@ -65,6 +96,16 @@ export const audioSessionService = {
     s.endedAt = new Date();
     s.endedBy = me;
     await s.save();
+    const peer =
+      String(s.ownerUserId) === me
+        ? String(s.listenerUserId)
+        : String(s.ownerUserId);
+    emit(peer, "audio.session.updated", {
+      sessionId: String(s._id),
+      status: "stopped",
+      ownerUserId: String(s.ownerUserId),
+      listenerUserId: String(s.listenerUserId),
+    });
     return s;
   },
 };

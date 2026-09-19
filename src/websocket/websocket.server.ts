@@ -54,10 +54,17 @@ export function attachWebSocket(server: Server) {
           const s: any = await signalingService.verify(id, m.sessionId, m.type);
           if (m.type === "audio.session.started")
             await audioSessionService.transition(id, m.sessionId, "active");
-          if (["audio.offer", "audio.ice_candidate"].includes(m.type))
+          if (m.type === "audio.offer")
             connections.send(String(s.ownerUserId), m);
           else if (m.type === "audio.answer")
             connections.send(String(s.listenerUserId), m);
+          else if (m.type === "audio.ice_candidate")
+            connections.send(
+              String(s.ownerUserId) === id
+                ? String(s.listenerUserId)
+                : String(s.ownerUserId),
+              m,
+            );
           else if (m.type === "audio.session.started")
             connections.send(
               String(s.ownerUserId) === id

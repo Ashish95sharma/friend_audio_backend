@@ -21,6 +21,35 @@ export const sessions = {
         { ownerUserId: b, listenerUserId: a },
       ],
     }),
+  /** Drop unfinished sessions so a new listen request is not blocked as BUSY. */
+  clearPendingFor: async (id: string) => {
+    const staleBefore = new Date(Date.now() - 2 * 60 * 1000);
+    await AudioSession.updateMany(
+      {
+        status: { $in: ["requesting", "connecting", "stopping", "active"] },
+        $or: [{ ownerUserId: id }, { listenerUserId: id }],
+        updatedAt: { $lt: staleBefore },
+      },
+      {
+        $set: {
+          status: "stopped",
+          endedAt: new Date(),
+        },
+      },
+    );
+    await AudioSession.updateMany(
+      {
+        status: { $in: ["requesting", "connecting", "stopping"] },
+        $or: [{ ownerUserId: id }, { listenerUserId: id }],
+      },
+      {
+        $set: {
+          status: "stopped",
+          endedAt: new Date(),
+        },
+      },
+    );
+  },
   updateState: (id: string, from: string[], to: string, extra: any = {}) =>
     AudioSession.findOneAndUpdate(
       { _id: id, status: { $in: from } },

@@ -16,8 +16,11 @@ export async function canListen(listenerUserId: string, ownerUserId: string) {
     return { ok: false, code: "NOT_FRIENDS" };
   const p = await permissions.get(ownerUserId, listenerUserId);
   if (!p?.isAllowed) return { ok: false, code: "AUDIO_PERMISSION_DENIED" };
-  if (!o.isOnline && !connections.has(ownerUserId))
-    return { ok: false, code: "AUDIO_OWNER_OFFLINE" };
+
+  // Live socket wins; DB flag is the fallback after Render restarts.
+  const online = connections.has(ownerUserId) || !!o.isOnline;
+  if (!online) return { ok: false, code: "AUDIO_OWNER_OFFLINE" };
+
   if (await sessions.activeFor(ownerUserId))
     return { ok: false, code: "AUDIO_OWNER_BUSY" };
   if (await sessions.activeFor(listenerUserId))
